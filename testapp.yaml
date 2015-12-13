@@ -1,0 +1,159 @@
+#
+# This is a hello world HOT template just defining a single compute
+# server.
+#
+#
+heat_template_version: 2013-05-23
+
+description: >
+  Heat Docker template using software deployments.
+
+parameters:
+  image:
+    type: string
+    label: Image name or ID
+    description: Image to be used for compute instance
+    default: rhel7.1-server_x86_64
+  flavor:
+    type: string
+    label: Flavor
+    description: Type of instance (flavor) to be used
+    default: m1.small
+  key:
+    type: string
+    label: Key name
+    description: Name of key-pair to be used for compute instance
+    default: cloud-key
+  private_network:
+    type: string
+    label: Private network name or ID
+    description: Network to attach instance to.
+    default: docker-demos-net
+  ORCA_ADMIN_PASSWORD:
+    type: string
+    label: Admin password for DUCP console
+    description: Prompt for password.
+    default: 
+  REGISTRY_USERNAME:
+    type: string
+    label: Hub account name
+    description: Prompt for Hub name 
+    default: bgrissin 
+  REGISTRY_PASSWORD:
+    type: string
+    label: Hub password
+    description: Prompt for Hub password
+    default: 
+  REGISTRY_EMAIL:
+    type: string
+    label: Hub email
+    description: Prompt for Hub email
+    default: ben.grissinger@docker.com
+
+resources:
+  server1:
+    type: OS::Nova::Server
+    properties:
+      name: DUCP_swarm_master
+      image: { get_param: image }
+      flavor: { get_param: flavor }
+      key_name: { get_param: key }
+      networks:
+        - network: { get_param: private_network }
+      security_groups:
+        - {get_resource: docker_sg}
+      user_data: |
+        #!/bin/sh 
+        curl -sSL https://get.docker.com/ | sh
+        systemctl start docker
+        usermod -aG docker cloud-init | sh
+      user_data_format: RAW
+  server2:
+    type: OS::Nova::Server
+    properties:
+      name: DUCP_node_1
+      image: { get_param: image }
+      flavor: { get_param: flavor }
+      key_name: { get_param: key }
+      networks:
+        - network: { get_param: private_network }
+      security_groups:
+        - {get_resource: docker_sg}
+      user_data: |
+        #!/bin/sh
+        echo "Docker Docker Docker!"
+        curl -sSL https://get.docker.com/ | sh
+        systemctl start docker
+        usermod -aG docker cloud-init | sh
+      user_data_format: RAW
+  server3:
+    type: OS::Nova::Server
+    properties:
+      name: DUCP_node_2
+      image: { get_param: image }
+      flavor: { get_param: flavor }
+      key_name: { get_param: key }
+      networks:
+        - network: { get_param: private_network }
+      security_groups:
+        - {get_resource: docker_sg}
+      user_data: |
+        #!/bin/sh
+        echo "Docker Docker Docker!"
+        curl -sSL https://get.docker.com/ | sh
+        systemctl start docker
+        usermod -aG docker cloud-init | sh
+      user_data_format: RAW
+
+  docker_sg:
+    type: OS::Neutron::SecurityGroup
+    properties:
+      description: Ping, SSH, Docker
+      rules:
+      - protocol: icmp
+      - protocol: tcp
+        port_range_min: 22
+        port_range_max: 22
+      - protocol: tcp
+        port_range_min: 80
+        port_range_max: 80
+      - protocol: tcp
+        port_range_min: 443
+        port_range_max: 443
+      - protocol: tcp
+        port_range_min: 2376
+        port_range_max: 2376
+      - protocol: tcp
+        port_range_min: 12376
+        port_range_max: 12376
+      - protocol: tcp
+        port_range_min: 12379
+        port_range_max: 12379
+      - protocol: tcp
+        port_range_min: 12380
+        port_range_max: 12380
+      - protocol: tcp
+        port_range_min: 12381
+        port_range_max: 12381
+      - protocol: tcp
+        port_range_min: 12382
+        port_range_max: 12382
+
+  floating_ip:
+    type: OS::Nova::FloatingIP
+    properties:
+      pool: ext-net
+
+  association:
+    type: OS::Nova::FloatingIPAssociation
+    properties:
+      floating_ip: { get_resource: floating_ip }
+      server_id: { get_resource: server1 }
+
+outputs:
+  instance_name:
+    description: Name of the instance
+    value: { get_attr: [server1, name] }
+  instance_ip:
+    description: IP address of the instance
+    value: { get_attr: [server1, first_address] }
