@@ -32,14 +32,14 @@ parameters:
 
 resources:
     server1_wait_condition:
-        type: AWS::CloudFormation::WaitCondition
+        type: OS::Heat::WaitCondition
         depends_on: server1
         properties:
             handle: { get_resource: server1_wait_handle }
             timeout: 600
 
     server1_wait_handle:
-        type: AWS::CloudFormation::WaitConditionHandle 
+        type: OS::Heat::WaitConditionHandle 
 
   server1:
     type: OS::Nova::Server
