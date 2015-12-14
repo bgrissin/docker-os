@@ -29,26 +29,6 @@ parameters:
     label: Private network name or ID
     description: Network to attach instance to.
     default: docker-demos-net
-  ORCA_ADMIN_PASSWORD:
-    type: string
-    label: Admin password for DUCP console
-    description: Prompt for password.
-    default: 
-  REGISTRY_USERNAME:
-    type: string
-    label: Hub account name
-    description: Prompt for Hub name 
-    default: bgrissin 
-  REGISTRY_PASSWORD:
-    type: string
-    label: Hub password
-    description: Prompt for Hub password
-    default: 
-  REGISTRY_EMAIL:
-    type: string
-    label: Hub email
-    description: Prompt for Hub email
-    default: ben.grissinger@docker.com
 
 resources:
   server1:
@@ -66,11 +46,11 @@ resources:
         #!/bin/sh 
         curl -sSL https://get.docker.com/ | sh
         systemctl start docker
-        usermod -aG docker ec2-user | sh
+        docker run --rm -e DUCP_ADMIN_PASSWORD='passw0rd' -e DUCP_ADMIN_USER='admin' -e REGISTRY_USERNAME='bgrissin' -e REGISTRY_PASSWORD='@maTThew10@' -e REGISTRY_EMAIL='ben.grissinger@docker.com' -v /var/run/docker.sock:/var/run/docker.sock --name ucp dockerorca/ucp install --old-kernel
       user_data_format: RAW
-        docker run --rm -it -e $ORCA_ADMIN_PASSWORD -e $REGISTRY_USERNAME -e $REGISTRY_PASSWORD -e $REGISTRY_EMAIL -v /var/run/docker.sock:/var/run/docker.sock --name ucp dockerorca/ucp install -i --old-kernel --san ducp.dockering.com
   server2:
     type: OS::Nova::Server
+    depends_on: server1
     properties:
       name: DUCP_node_1
       image: { get_param: image }
@@ -81,14 +61,18 @@ resources:
       security_groups:
         - {get_resource: docker_sg}
       user_data: |
-        #!/bin/sh
-        curl -sSL https://get.docker.com/ | sh
-        systemctl start docker
-        usermod -aG docker ec2-user | sh
+        str_replace:
+          template: |
+            #!/bin/sh
+            curl -sSL https://get.docker.com/ | sh
+            systemctl start docker
+            docker run --rm -e DUCP_ADMIN_PASSWORD='passw0rd' -e DUCP_ADMIN_USER='admin' -e REGISTRY_USERNAME='bgrissin' -e REGISTRY_PASSWORD='@maTThew10@' -e REGISTRY_EMAIL='ben.grisinger@docker.com' -v /var/run/docker.sock:/var/run/docker.sock --name ucp dockerorca/ucp join --old-kernel --url=$server1_url           
+          params: 
+            $server1_url:{get_attr:[server1,networks,private,0]}
       user_data_format: RAW
-        docker run --rm -it -e $ORCA_ADMIN_PASSWORD -e $REGISTRY_USERNAME -e $REGISTRY_PASSWORD -e $REGISTRY_EMAIL -v /var/run/docker.sock:/var/run/docker.sock --name ucp dockerorca/ucp join -i --old-kernel --san ducp.dockering.com
   server3:
     type: OS::Nova::Server
+    depends_on: server1
     properties:
       name: DUCP_node_2
       image: { get_param: image }
@@ -99,12 +83,15 @@ resources:
       security_groups:
         - {get_resource: docker_sg}
       user_data: |
-        #!/bin/sh
-        curl -sSL https://get.docker.com/ | sh
-        systemctl start docker
-        usermod -aG docker ec2-user | sh
+        str_replace:
+          template: |
+            #!/bin/sh
+            curl -sSL https://get.docker.com/ | sh
+            systemctl start docker
+            docker run --rm -e DUCP_ADMIN_PASSWORD='passw0rd' -e DUCP_ADMIN_USER='admin' -e REGISTRY_USERNAME='bgrissin' -e REGISTRY_PASSWORD='@maTThew10@' -e REGISTRY_EMAIL='ben.grisinger@docker.com' -v /var/run/docker.sock:/var/run/docker.sock --name ucp dockerorca/ucp join --old-kernel --url=$server1_url           
+          params: 
+            $server1_url:{get_attr:[server1,networks,private, 0]}
       user_data_format: RAW
-        docker run --rm -it -e $ORCA_ADMIN_PASSWORD -e $REGISTRY_USERNAME -e $REGISTRY_PASSWORD -e $REGISTRY_EMAIL -v /var/run/docker.sock:/var/run/docker.sock --name ucp dockerorca/ucp join -i --old-kernel --san ducp.dockering.com
   docker_sg:
     type: OS::Neutron::SecurityGroup
     properties:
