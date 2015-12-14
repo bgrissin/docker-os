@@ -60,15 +60,15 @@ resources:
         - network: { get_param: private_network }
       security_groups:
         - {get_resource: docker_sg}
-      user_data: |
+      user_data:
         str_replace:
           template: |
             #!/bin/sh
             curl -sSL https://get.docker.com/ | sh
             systemctl start docker
-            docker run --rm -e DUCP_ADMIN_PASSWORD='passw0rd' -e DUCP_ADMIN_USER='admin' -e REGISTRY_USERNAME='bgrissin' -e REGISTRY_PASSWORD='@maTThew10@' -e REGISTRY_EMAIL='ben.grisinger@docker.com' -v /var/run/docker.sock:/var/run/docker.sock --name ucp dockerorca/ucp join --old-kernel --url=$server1_url           
+            docker run --rm -e DUCP_ADMIN_PASSWORD='passw0rd' -e DUCP_ADMIN_USER='admin' -e REGISTRY_USERNAME='bgrissin' -e REGISTRY_PASSWORD='@maTThew10@' -e REGISTRY_EMAIL='ben.grisinger@docker.com' -v /var/run/docker.sock:/var/run/docker.sock --name ucp dockerorca/ucp join --old-kernel --url=https://$server1_url  
           params: 
-            $server1_url:{get_attr:[server1,networks,private,0]}
+            $server1_url: {get_attr: [server1,networks,private,0]}
       user_data_format: RAW
   server3:
     type: OS::Nova::Server
@@ -82,15 +82,15 @@ resources:
         - network: { get_param: private_network }
       security_groups:
         - {get_resource: docker_sg}
-      user_data: |
+      user_data:
         str_replace:
           template: |
             #!/bin/sh
             curl -sSL https://get.docker.com/ | sh
             systemctl start docker
-            docker run --rm -e DUCP_ADMIN_PASSWORD='passw0rd' -e DUCP_ADMIN_USER='admin' -e REGISTRY_USERNAME='bgrissin' -e REGISTRY_PASSWORD='@maTThew10@' -e REGISTRY_EMAIL='ben.grisinger@docker.com' -v /var/run/docker.sock:/var/run/docker.sock --name ucp dockerorca/ucp join --old-kernel --url=$server1_url           
+            docker run --rm -e DUCP_ADMIN_PASSWORD='passw0rd' -e DUCP_ADMIN_USER='admin' -e REGISTRY_USERNAME='bgrissin' -e REGISTRY_PASSWORD='@maTThew10@' -e REGISTRY_EMAIL='ben.grisinger@docker.com' -v /var/run/docker.sock:/var/run/docker.sock --name ucp dockerorca/ucp join --old-kernel —-url=https://$server1_url    
           params: 
-            $server1_url:{get_attr:[server1,networks,private, 0]}
+            $server1_url: {get_attr: [server1,networks,private, 0]}
       user_data_format: RAW
   docker_sg:
     type: OS::Neutron::SecurityGroup
