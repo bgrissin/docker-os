@@ -59,14 +59,14 @@ resources:
                 curl -sSL https://get.docker.com/ | sh
                 systemctl start docker
                 docker run --rm -e DUCP_ADMIN_PASSWORD='passw0rd' -e DUCP_ADMIN_USER='admin' -e REGISTRY_USERNAME='bgrissin' -e REGISTRY_PASSWORD='@maTThew10@' -e REGISTRY_EMAIL='ben.grissinger@docker.com' -v /var/run/docker.sock:/var/run/docker.sock --name ucp dockerorca/ucp install --old-kernel
-                curl -X PUT -H 'Content-Type:application/json' -d '{"Status" : "SUCCESS","Reason" : "Configuration OK","UniqueId" : "server1","Data" : "server1 Configured."}' "$wait_notify"
+                curl -X PUT -H 'Content-Type:application/json' -d '{"Status" : "SUCCESS"}' "$wait_notify"
             params:
                 $wait_notify: { get_attr: ['server1_wait_handle', 'curl_cli'] }
       user_data_format: RAW
 
   server2:
     type: OS::Nova::Server
-    depends_on: server1
+    depends_on: server1_wait_condition
     properties:
       name: DUCP_node_1
       image: { get_param: image }
@@ -89,7 +89,7 @@ resources:
       
   server3:
     type: OS::Nova::Server
-    depends_on: server1
+    depends_on: server1_wait_condition
     properties:
       name: DUCP_node_2
       image: { get_param: image }
