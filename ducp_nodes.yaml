@@ -86,7 +86,7 @@ resources:
             $dockercmd --fingerprint "${fingerprint::-1}"
             rm /tmp/$$.out
           params: 
-                $server3_url: {get_pzram: swarm_cluster}
+                $server3_url: {get_param: swarm_cluster}
       user_data_format: RAW
 
   docker_sg:
