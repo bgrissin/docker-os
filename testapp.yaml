@@ -31,6 +31,16 @@ parameters:
     default: docker-demos-net
 
 resources:
+    server1_wait_condition:
+        type: AWS::CloudFormation::WaitCondition
+        depends_on: server1
+        properties:
+            handle: { get_resource: server1_wait_handle }
+            timeout: 600
+
+    server1_wait_handle:
+        type: AWS::CloudFormation::WaitConditionHandle 
+
   server1:
     type: OS::Nova::Server
     properties:
@@ -42,11 +52,16 @@ resources:
         - network: { get_param: private_network }
       security_groups:
         - {get_resource: docker_sg}
-      user_data: |
-        #!/bin/sh 
-        curl -sSL https://get.docker.com/ | sh
-        systemctl start docker
-        docker run --rm -e DUCP_ADMIN_PASSWORD='passw0rd' -e DUCP_ADMIN_USER='admin' -e REGISTRY_USERNAME='bgrissin' -e REGISTRY_PASSWORD='@maTThew10@' -e REGISTRY_EMAIL='ben.grissinger@docker.com' -v /var/run/docker.sock:/var/run/docker.sock --name ucp dockerorca/ucp install --old-kernel
+      user_data: 
+        str_replace:
+            template: |
+                #!/bin/sh 
+                curl -sSL https://get.docker.com/ | sh
+                systemctl start docker
+                docker run --rm -e DUCP_ADMIN_PASSWORD='passw0rd' -e DUCP_ADMIN_USER='admin' -e REGISTRY_USERNAME='bgrissin' -e REGISTRY_PASSWORD='@maTThew10@' -e REGISTRY_EMAIL='ben.grissinger@docker.com' -v /var/run/docker.sock:/var/run/docker.sock --name ucp dockerorca/ucp install --old-kernel
+                curl -X PUT -H 'Content-Type:application/json' -d '{"Status" : "SUCCESS","Reason" : "Configuration OK","UniqueId" : "server1","Data" : "server1 Configured."}' "$wc_notify"
+            parameters:
+                $wait_notify: { get_attr: ['server1_wait_handle', 'curl_cli'] }
       user_data_format: RAW
   server2:
     type: OS::Nova::Server
