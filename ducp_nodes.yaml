@@ -1,12 +1,12 @@
-
-# This is a hello world HOT template just defining a single compute
-# server.
+#
+# This is a HOT template to join two ducp swarm nodes to an existing DUCP swarm master
+# (see the ducp_master.yaml HOT template for master DUCP deploy)
 #
 #
 heat_template_version: 2013-05-23
 
 description: >
-  Heat Docker template using software deployments.
+  Heat Docker template to deploy 2 swarm nodes to DUCP within in an Openstack environment.
 
 parameters:
   image:
@@ -33,7 +33,33 @@ parameters:
     type: string
     label: url of DUCP master
     description: swarm cluster to attach instance to.
-    default: https://192.168.10.207
+    default: https://192.168.10.217
+  ucpadmuser:
+    type: string
+    label: DUCP master account
+    description: default is admin.
+    default: admin
+  ucpadmpasswd:
+    type: string
+    label: DUCP admin password
+    description:
+    default: orca
+  regname:
+    type: string
+    label: HUB user name
+    description: hub.docker.com account
+    default:
+  regpasswd:
+    type: string
+    label: HUB password
+    description: hub.docker.com password
+    default:
+    hidden: true
+  regemail:
+    type: string
+    label: HUB email acccount
+    description: hub.docker.com email
+    default:
 
 resources:
   server2:
@@ -53,7 +79,7 @@ resources:
             #!/bin/sh
             curl -sSL https://get.docker.com/ | sh
             systemctl start docker
-            dockercmd="docker run --rm -e UCP_ADMIN_PASSWORD=orca -e UCP_ADMIN_USER=admin -e REGISTRY_USERNAME=bgrissin -e REGISTRY_PASSWORD=@maTThew10@ -e REGISTRY_EMAIL=ben.grissinger@docker.com -v /var/run/docker.sock:/var/run/docker.sock --name ucp dockerorca/ucp join --old-kernel --url=$server2_url"
+            dockercmd="docker run --rm -e UCP_ADMIN_PASSWORD=$ucp_admin_passwd -e UCP_ADMIN_USER=$ucp_admin_user -e REGISTRY_USERNAME=$registry_name -e REGISTRY_PASSWORD=$registry_password -e REGISTRY_EMAIL=$registry_email -v /var/run/docker.sock:/var/run/docker.sock --name ucp dockerorca/ucp join --old-kernel --url=$server2_url"
             $($dockercmd > /tmp/test.out 2>&1)
             fingerprint=$( cat /tmp/test.out | grep SHA1 | cut -d '"' -f 4)
             echo $fingerprint
@@ -61,6 +87,13 @@ resources:
             rm /tmp/test.out
           params:  
               $server2_url: {get_param: swarm_cluster}
+              $ucp_admin_passwd: {get_param: ucpadmpasswd}
+              $ucp_admin_user: {get_param: ucpadmuser}
+              $registry_name: {get_param: regname}
+              $registry_password: {get_param: regpasswd}
+              $registry_email: {get_param: regemail}
+      user_data_format: RAW
+
       user_data_format: RAW
 
   server3:
@@ -80,7 +113,7 @@ resources:
             #!/bin/sh
             curl -sSL https://get.docker.com/ | sh
             systemctl start docker
-            dockercmd="docker run --rm -e UCP_ADMIN_PASSWORD=orca -e UCP_ADMIN_USER=admin -e REGISTRY_USERNAME=bgrissin -e REGISTRY_PASSWORD=@maTThew10@ -e REGISTRY_EMAIL=ben.grissinger@docker.com -v /var/run/docker.sock:/var/run/docker.sock --name ucp dockerorca/ucp join --old-kernel --url=$server3_url"
+            dockercmd="docker run --rm -e UCP_ADMIN_PASSWORD=$ucp_admin_passwd -e UCP_ADMIN_USER=$ucp_admin_user -e REGISTRY_USERNAME=$registry_name -e REGISTRY_PASSWORD=$registry_password -e REGISTRY_EMAIL=$registry_email -v /var/run/docker.sock:/var/run/docker.sock --name ucp dockerorca/ucp join --old-kernel --url=$server3_url"
             $dockercmd > /tmp/test.out 2>&1 
             fingerprint=$( cat /tmp/test.out | grep SHA1 | cut -d '"' -f 4)
             echo $fingerprint
@@ -88,6 +121,11 @@ resources:
             rm /tmp/test.out
           params: 
               $server3_url: {get_param: swarm_cluster}
+              $ucp_admin_passwd: {get_param: ucpadmpasswd}
+              $ucp_admin_user: {get_param: ucpadmuser}
+              $registry_name: {get_param: regname}
+              $registry_password: {get_param: regpasswd}
+              $registry_email: {get_param: regemail}
       user_data_format: RAW
 
   docker_sg:
@@ -123,7 +161,6 @@ resources:
       - protocol: tcp
         port_range_min: 12382
         port_range_max: 12382
-
 
 outputs:
   instance_name:
