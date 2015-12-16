@@ -33,8 +33,8 @@ parameters:
     default: docker-demos-net
   ucpadmuser:
     type: string
-    label: url of DUCP master
-    description: default is admino.
+    label: DUCP admin user
+    description: Default Admin username of DUCP.
     default: admin
   ucpadmpasswd:
     type: string
@@ -72,12 +72,59 @@ parameters:
   ucd_relay_url:
     type: string
     description: The server URL for an agent relay - leave as 'None' to enable agents to communicate with server directly.
-    default: 'None'
+    default: 'None' 
+
 resources:
-  server1:
+
+  master_wait_handle:
+      type: AWS::CloudFormation::WaitConditionHandle 
+
+  master_wait_condition:
+      type: AWS::CloudFormation::WaitCondition
+      depends_on: ducp_master
+      properties:
+          Handle: { get_resource: master_wait_handle }
+          Timeout: 600
+
+  slave_wait_handle:
+      type: AWS::CloudFormation::WaitConditionHandle 
+
+  slave_wait_condition:
+      type: AWS::CloudFormation::WaitCondition
+      depends_on: ducp_master
+      properties:
+          Handle: { get_resource: slave_wait_handle }
+          Timeout: 600
+          Count: 2
+
+  ducp_master:
     type: OS::Nova::Server
     properties:
-      name: DUCP_swarm_master
+      image: { get_param: image }
+      flavor: { get_param: flavor }
+      key_name: { get_param: key }
+      networks:
+          - network: { get_param: private_network }
+      security_groups:
+        - {get_resource: docker_sg}
+      user_data: {get_resource: cloud_init_ducp}
+      user_data_format: RAW
+
+  ducp_floating_ip:
+    type: OS::Nova::FloatingIP
+    properties:
+      pool: ext-net
+
+  ducp_association:
+    type: OS::Nova::FloatingIPAssociation
+    properties:
+      floating_ip: { get_resource: ducp_floating_ip }
+      server_id: { get_resource: ducp_master }
+
+  server2:
+    type: OS::Nova::Server
+    depends_on: master_wait_condition
+    properties:
       image: { get_param: image }
       flavor: { get_param: flavor }
       key_name: { get_param: key }
@@ -85,14 +132,28 @@ resources:
           - network: { get_param: private_network  }
       security_groups:
         - {get_resource: docker_sg}
-      user_data: {get_resource: cloud_init_mime}
+      user_data: {get_resource: cloud_init_join}
+      user_data_format: RAW
+
+  server3:
+    type: OS::Nova::Server
+    depends_on: master_wait_condition
+    properties:
+      image: { get_param: image }
+      flavor: { get_param: flavor }
+      key_name: { get_param: key }
+      networks:
+          - network: { get_param: private_network  }
+      security_groups:
+        - {get_resource: docker_sg}
+      user_data: {get_resource: cloud_init_join}
       user_data_format: RAW
 
   store-frontend:
     type: IBM::UrbanCode::SoftwareDeploy::UCD
     properties:
       apply_config: { get_resource: store-frontend_sw_config }
-      server: server1
+      server: ducp_master
       version: LATEST
       agent_timeout: '900'
 
@@ -101,13 +162,17 @@ resources:
     properties: 
       name: "store-frontend"
       component_process: Deploy
-      component_process_timeout: '900'
+      component_process_timeout: "300"
       ucd_server_url: { get_param: ucd_server_url } # these should come from resource_tree
       ucd_username: { get_param: ucd_user }
       ucd_password: { get_param: ucd_password }
       application: { get_attr: [resource_tree, application_name] }
       environment_name: { get_attr: [resource_tree, environment_name] }
       inputs:
+        ducp.user: { get_param: ucpadmuser }  # default is admino.
+        docker.opts : "-H tcp://${p:ducp.host}:443 --tlsverify --tlscert=${p:resource/work.dir}${p:component.name}/cert.pem --tlskey=${p:resource/work.dir}${p:component.name}/key.pem --tlscacert=${p:resource/work.dir}${p:component.name}/ca.pem"
+        ducp.host : "${p:agent/if-eth0-1-ip}"
+        ducp.password: { get_param: ucpadmpasswd }
 
   docker_sg:
     type: OS::Neutron::SecurityGroup
@@ -143,17 +208,6 @@ resources:
         port_range_min: 12382
         port_range_max: 12382
 
-  floating_ip:
-    type: OS::Nova::FloatingIP
-    properties:
-      pool: ext-net
-
-  association:
-    type: OS::Nova::FloatingIPAssociation
-    properties:
-      floating_ip: { get_resource: floating_ip }
-      server_id: { get_resource: server1 }
-
   resource_tree:
     type: IBM::UrbanCode::ResourceTree
     properties: 
@@ -162,7 +216,7 @@ resources:
        password: { get_param: ucd_password }
        team_mappings: 
        application: NodeStore
-       base_resource_group: Swarm Clusters
+       base_resource_group:
 
   ucd_agent_install_linux:
     type: OS::Heat::SoftwareConfig
@@ -210,16 +264,51 @@ resources:
             #!/bin/sh
             curl -sSL https://get.docker.com/ | sh
             systemctl start docker
-            docker run --rm -e UCP_ADMIN_PASSWORD=$ucp_admin_passwd -e UCP_ADMIN_USER=$ucp_admin_user -e REGISTRY_USERNAME=$registry_name -e REGISTRY_PASSWORD='$registry_password' -e REGISTRY_EMAIL=$registry_email -v /var/run/docker.sock:/var/run/docker.sock --name ucp dockerorca/ucp install --old-kernel --san $ip_san
+            docker run --rm -e UCP_ADMIN_PASSWORD=$ucp_admin_passwd -e UCP_ADMIN_USER=$ucp_admin_user -e REGISTRY_USERNAME=$registry_name -e REGISTRY_PASSWORD='$registry_password' -e REGISTRY_EMAIL=$registry_email -v /var/run/docker.sock:/var/run/docker.sock --name ucp dockerorca/ucp install --old-kernel
           params:
-              $ucp_admin_passwd: {get_param: ucpadmpasswd}
-              $ucp_admin_user: {get_param: ucpadmuser}
-              $registry_name: {get_param: regname}
-              $registry_password: {get_param: regpasswd}
-              $registry_email: {get_param: regemail}
-              $ip_san: { get_attr: [server1, first_address] }
+            $ucp_admin_passwd: {get_param: ucpadmpasswd}
+            $ucp_admin_user: {get_param: ucpadmuser}
+            $registry_name: {get_param: regname}
+            $registry_password: {get_param: regpasswd}
+            $registry_email: {get_param: regemail}
 
-  cloud_init_mime:
+  clear_master_wait:
+    type: OS::Heat::SoftwareConfig
+    properties:
+      config:
+        str_replace:
+          template: |
+            #!/bin/bash
+            curl -X PUT -H 'Content-Type:application/json' -d '{"Status" : "SUCCESS","Reason" : "Configuration OK","UniqueId" : "ducp_master","Data" : "DUCP Master Configured."}' "$wait_notify"
+          params:
+            $wait_notify: { get_resource: 'master_wait_handle' }
+
+  join_ducp:
+    type: OS::Heat::SoftwareConfig
+    properties:
+      config:
+       str_replace:
+        template: |
+          #!/bin/sh
+          curl -sSL https://get.docker.com/ | sh
+          systemctl start docker
+          dockercmd="docker run --rm -e UCP_ADMIN_PASSWORD=$ucp_admin_passwd -e UCP_ADMIN_USER=$ucp_admin_user -e REGISTRY_USERNAME=$registry_name -e REGISTRY_PASSWORD=$registry_password -e REGISTRY_EMAIL=$registry_email -v /var/run/docker.sock:/var/run/docker.sock --name ucp dockerorca/ucp join --old-kernel --url=https://$ducp_url"
+          $($dockercmd > /tmp/test.out 2>&1)
+          fingerprint=$( cat /tmp/test.out | grep SHA1 | cut -d '"' -f 4)
+          echo $fingerprint
+          $dockercmd --fingerprint $fingerprint
+          rm /tmp/test.out
+          curl -X PUT -H 'Content-Type:application/json' -d '{"Status" : "SUCCESS","Reason" : "Configuration OK","UniqueId" : "server1","Data" : "Slave Configured."}' "$wc_notify"
+        params:  
+            $wait_notify: { get_resource: 'slave_wait_handle' }
+            $ducp_url: {get_attr: [ducp_master, first_address]}
+            $ucp_admin_passwd: {get_param: ucpadmpasswd}
+            $ucp_admin_user: {get_param: ucpadmuser}
+            $registry_name: {get_param: regname}
+            $registry_password: {get_param: regpasswd}
+            $registry_email: {get_param: regemail}
+
+  cloud_init_ducp:
     type: OS::Heat::MultipartMime
     properties:
       parts:
@@ -227,14 +316,23 @@ resources:
           subtype: "x-shellscript"
         - config: {get_resource: ucd_agent_install_linux}
           subtype: "x-shellscript"
+        - config: {get_resource: clear_master_wait}
+          subtype: "x-shellscript"
+
+  cloud_init_join:
+    type: OS::Heat::MultipartMime
+    properties:
+      parts:
+        - config: { get_resource: join_ducp }
+          subtype: "x-shellscript"
 
 outputs:
   instance_name:
     description: Name of the instance
-    value: { get_attr: [server1, name] }
+    value: { get_attr: [ducp_master, name] }
   instance_ip:
     description: IP address of the instance
-    value: { get_attr: [server1, first_address] }
+    value: { get_attr: [ducp_master, first_address] }
   blueprint_url:
     description: Blueprint Origin URL
     value:  https://192.168.10.229:8443/landscaper/view/projects?open=ucdpadmin_00000000_0000_0000_0000_000000000002-OrionContent/Internal-Team/DUCP_swarm_master_build/DUCP_swarm_master_build.yml
