@@ -1,0 +1,241 @@
+
+# This is a HOT template to join two ducp swarm nodes to an existing DUCP swarm master
+# (see the ducp_master.yaml HOT template for master DUCP deploy)
+#
+#
+heat_template_version: 2013-05-23
+
+description: >
+  Heat Docker template to deploy 2 swarm nodes to DUCP within in an Openstack environment.
+#
+#
+
+parameters:
+  image:
+    type: string
+    label: Image name or ID
+    description: Image to be used for compute instance
+    default: rhel7.1-server_x86_64
+  flavor:
+    type: string
+    label: Flavor
+    description: Type of instance (flavor) to be used
+    default: m1.small
+  key:
+    type: string
+    label: Key name
+    description: Name of key-pair to be used for compute instance
+    default: cloud-key
+  private_network:
+    type: string
+    label: Private network name or ID
+    description: Network to attach instance to.
+    default: docker-demos-net
+  ucpadmuser:
+    type: string
+    label: url of DUCP master
+    description: default is admino.
+    default: admin
+  ucpadmpasswd:
+    type: string
+    label: DUCP admin password
+    description:
+    default: orca
+  regname:
+    type: string
+    label: HUB user name
+    description: hub.docker.com account
+    default:
+  regpasswd:
+    type: string
+    label: HUB password
+    description: hub.docker.com password
+    default:
+    hidden: true
+  regemail:
+    type: string
+    label: HUB email acccount
+    description: hub.docker.com email
+    default:
+  ucd_server_url:
+    type: string
+    description: The server URL for agent communication to UrbanCode Deploy. Do *not* add a trailing slash.
+    default: 'https://192.168.10.82:8443'
+  ucd_user:
+    type: string
+    description: The user credential for the UrbanCode Deploy server.
+    default: 'admin'
+  ucd_password:
+    type: string
+    description: The user credential for the UrbanCode Deploy server.
+    default: 'D3m0T1m3'
+  ucd_relay_url:
+    type: string
+    description: The server URL for an agent relay - leave as 'None' to enable agents to communicate with server directly.
+    default: 'None'
+resources:
+  server1:
+    type: OS::Nova::Server
+    properties:
+      name: DUCP_swarm_master
+      image: { get_param: image }
+      flavor: { get_param: flavor }
+      key_name: { get_param: key }
+      networks:
+          - network: { get_param: private_network  }
+      security_groups:
+        - {get_resource: docker_sg}
+      user_data: {get_resource: cloud_init_mime}
+      user_data_format: RAW
+
+  store-frontend:
+    type: IBM::UrbanCode::SoftwareDeploy::UCD
+    properties:
+      apply_config: { get_resource: store-frontend_sw_config }
+      server: server1
+      version: LATEST
+      agent_timeout: '900'
+
+  store-frontend_sw_config:
+    type: IBM::UrbanCode::SoftwareConfig::UCD
+    properties: 
+      name: "store-frontend"
+      component_process: Deploy
+      component_process_timeout: '900'
+      ucd_server_url: { get_param: ucd_server_url } # these should come from resource_tree
+      ucd_username: { get_param: ucd_user }
+      ucd_password: { get_param: ucd_password }
+      application: { get_attr: [resource_tree, application_name] }
+      environment_name: { get_attr: [resource_tree, environment_name] }
+      inputs:
+
+  docker_sg:
+    type: OS::Neutron::SecurityGroup
+    properties:
+      description: Ping, SSH, Docker
+      rules:
+      - protocol: icmp
+      - protocol: tcp
+        port_range_min: 22
+        port_range_max: 22
+      - protocol: tcp
+        port_range_min: 80
+        port_range_max: 80
+      - protocol: tcp
+        port_range_min: 443
+        port_range_max: 443
+      - protocol: tcp
+        port_range_min: 2376
+        port_range_max: 2376
+      - protocol: tcp
+        port_range_min: 12376
+        port_range_max: 12376
+      - protocol: tcp
+        port_range_min: 12379
+        port_range_max: 12379
+      - protocol: tcp
+        port_range_min: 12380
+        port_range_max: 12380
+      - protocol: tcp
+        port_range_min: 12381
+        port_range_max: 12381
+      - protocol: tcp
+        port_range_min: 12382
+        port_range_max: 12382
+
+  floating_ip:
+    type: OS::Nova::FloatingIP
+    properties:
+      pool: ext-net
+
+  association:
+    type: OS::Nova::FloatingIPAssociation
+    properties:
+      floating_ip: { get_resource: floating_ip }
+      server_id: { get_resource: server1 }
+
+  resource_tree:
+    type: IBM::UrbanCode::ResourceTree
+    properties: 
+       urbancode_deploy_url: { get_param: ucd_server_url }
+       username: { get_param: ucd_user }
+       password: { get_param: ucd_password }
+       team_mappings: 
+       application: NodeStore
+       base_resource_group: Swarm Clusters
+
+  ucd_agent_install_linux:
+    type: OS::Heat::SoftwareConfig
+    properties:
+      config:
+        str_replace:
+          template: |
+            #!/usr/bin/env bash
+            #ifconfig eth0 mtu 1454 ## Optionally patch the MTU
+            arch=`uname -ms | awk '{print tolower($0)}' | tr " " "-" `
+            agent_archive=ibm-ucd-agent-$arch.tgz
+            if [ "_ucd_relay_url_" != "None" ]; then
+              proxy_args="--proxy _ucd_relay_url_:20080"
+              ucd_remote_host=_ucd_relay_url_
+              agent_args="-r -d"
+            else
+              proxy_args=
+              agent_args=
+              ucd_remote_host=_ucd_server_url_
+            fi
+            curl $proxy_args -Lk --retry 10 --retry-delay 10 --retry-max-time 120 -o /tmp/$agent_archive -u _ucd_user_:_ucd_password_ "_ucd_server_url_/cli/version/downloadArtifacts?component=ucd-agent-$arch&version=_agent_version_&singleFilePath=$agent_archive"
+            tar xfz /tmp/$agent_archive -C /tmp
+            /tmp/ibm-ucd-agent-install/install-agent-with-options.sh -t "_agent_team_" -s $ucd_remote_host $agent_args -x start -n _agent_name_ 
+          params:
+            _agent_name_:
+               str_replace:
+                  template: |
+                    "_application_name_._environment_name_"
+                  params:
+                    _application_name_: { get_attr: [resource_tree, application_name ] }
+                    _environment_name_: { get_param: "OS::stack_name" }
+            _ucd_server_url_: { get_param: ucd_server_url }
+            _ucd_relay_url_: { get_param: ucd_relay_url }
+            _ucd_user_ : { get_param: ucd_user }
+            _ucd_password_ : { get_param: ucd_password }
+            _agent_version_ : 7.1
+            _agent_team_ : ""
+
+  install_ducp:
+    type: OS::Heat::SoftwareConfig
+    properties:
+      config:
+        str_replace:
+          template: |
+            #!/bin/sh
+            curl -sSL https://get.docker.com/ | sh
+            systemctl start docker
+            docker run --rm -e UCP_ADMIN_PASSWORD=$ucp_admin_passwd -e UCP_ADMIN_USER=$ucp_admin_user -e REGISTRY_USERNAME=$registry_name -e REGISTRY_PASSWORD='$registry_password' -e REGISTRY_EMAIL=$registry_email -v /var/run/docker.sock:/var/run/docker.sock --name ucp dockerorca/ucp install --old-kernel --san $ip_san
+          params:
+              $ucp_admin_passwd: {get_param: ucpadmpasswd}
+              $ucp_admin_user: {get_param: ucpadmuser}
+              $registry_name: {get_param: regname}
+              $registry_password: {get_param: regpasswd}
+              $registry_email: {get_param: regemail}
+              $ip_san: { get_attr: [server1, first_address] }
+
+  cloud_init_mime:
+    type: OS::Heat::MultipartMime
+    properties:
+      parts:
+        - config: { get_resource: install_ducp }
+          subtype: "x-shellscript"
+        - config: {get_resource: ucd_agent_install_linux}
+          subtype: "x-shellscript"
+
+outputs:
+  instance_name:
+    description: Name of the instance
+    value: { get_attr: [server1, name] }
+  instance_ip:
+    description: IP address of the instance
+    value: { get_attr: [server1, first_address] }
+  blueprint_url:
+    description: Blueprint Origin URL
+    value:  https://192.168.10.229:8443/landscaper/view/projects?open=ucdpadmin_00000000_0000_0000_0000_000000000002-OrionContent/Internal-Team/DUCP_swarm_master_build/DUCP_swarm_master_build.yml
+
