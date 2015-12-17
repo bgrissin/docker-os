@@ -76,27 +76,6 @@ parameters:
 
 resources:
 
-  master_wait_handle:
-      type: AWS::CloudFormation::WaitConditionHandle 
-
-  master_wait_condition:
-      type: AWS::CloudFormation::WaitCondition
-      depends_on: ducp_master
-      properties:
-          Handle: { get_resource: master_wait_handle }
-          Timeout: 600
-
-  slave_wait_handle:
-      type: AWS::CloudFormation::WaitConditionHandle 
-
-  slave_wait_condition:
-      type: AWS::CloudFormation::WaitCondition
-      depends_on: ducp_master
-      properties:
-          Handle: { get_resource: slave_wait_handle }
-          Timeout: 600
-          Count: 2
-
   ducp_master:
     type: OS::Nova::Server
     properties:
@@ -123,7 +102,6 @@ resources:
 
   server2:
     type: OS::Nova::Server
-    depends_on: master_wait_condition
     properties:
       image: { get_param: image }
       flavor: { get_param: flavor }
@@ -137,7 +115,6 @@ resources:
 
   server3:
     type: OS::Nova::Server
-    depends_on: master_wait_condition
     properties:
       image: { get_param: image }
       flavor: { get_param: flavor }
@@ -149,18 +126,35 @@ resources:
       user_data: {get_resource: cloud_init_join}
       user_data_format: RAW
 
-  store-frontend:
-    type: IBM::UrbanCode::SoftwareDeploy::UCD
+  cloud_init_ducp:
+    type: OS::Heat::MultipartMime
     properties:
-      apply_config: { get_resource: store-frontend_sw_config }
+      parts:
+        - config: { get_resource: install_ducp }
+          subtype: "x-shellscript"
+        - config: {get_resource: ucd_agent_install_linux}
+          subtype: "x-shellscript"
+
+  cloud_init_join:
+    type: OS::Heat::MultipartMime
+    properties:
+      parts:
+        - config: { get_resource: join_ducp }
+          subtype: "x-shellscript"
+
+  frontend:
+    type: IBM::UrbanCode::SoftwareDeploy::UCD
+    depends_on: [server2,server3]
+    properties:
+      apply_config: { get_resource: frontend_sw_config }
       server: ducp_master
       version: LATEST
       agent_timeout: '900'
 
-  store-frontend_sw_config:
+  frontend_sw_config:
     type: IBM::UrbanCode::SoftwareConfig::UCD
     properties: 
-      name: "store-frontend"
+      name: "frontend"
       component_process: Deploy
       component_process_timeout: "300"
       ucd_server_url: { get_param: ucd_server_url } # these should come from resource_tree
@@ -261,7 +255,7 @@ resources:
       config:
         str_replace:
           template: |
-            #!/bin/sh
+            #!/bin/bash
             curl -sSL https://get.docker.com/ | sh
             systemctl start docker
             docker run --rm -e UCP_ADMIN_PASSWORD=$ucp_admin_passwd -e UCP_ADMIN_USER=$ucp_admin_user -e REGISTRY_USERNAME=$registry_name -e REGISTRY_PASSWORD='$registry_password' -e REGISTRY_EMAIL=$registry_email -v /var/run/docker.sock:/var/run/docker.sock --name ucp dockerorca/ucp install --old-kernel
@@ -272,59 +266,36 @@ resources:
             $registry_password: {get_param: regpasswd}
             $registry_email: {get_param: regemail}
 
-  clear_master_wait:
-    type: OS::Heat::SoftwareConfig
-    properties:
-      config:
-        str_replace:
-          template: |
-            #!/bin/bash
-            curl -X PUT -H 'Content-Type:application/json' -d '{"Status" : "SUCCESS","Reason" : "Configuration OK","UniqueId" : "ducp_master","Data" : "DUCP Master Configured."}' "$wait_notify"
-          params:
-            $wait_notify: { get_resource: 'master_wait_handle' }
-
   join_ducp:
     type: OS::Heat::SoftwareConfig
     properties:
       config:
        str_replace:
         template: |
-          #!/bin/sh
+          #!/bin/bash -x
           curl -sSL https://get.docker.com/ | sh
           systemctl start docker
-          dockercmd="docker run --rm -e UCP_ADMIN_PASSWORD=$ucp_admin_passwd -e UCP_ADMIN_USER=$ucp_admin_user -e REGISTRY_USERNAME=$registry_name -e REGISTRY_PASSWORD=$registry_password -e REGISTRY_EMAIL=$registry_email -v /var/run/docker.sock:/var/run/docker.sock --name ucp dockerorca/ucp join --old-kernel --url=https://$ducp_url"
-          $($dockercmd > /tmp/test.out 2>&1)
-          fingerprint=$( cat /tmp/test.out | grep SHA1 | cut -d '"' -f 4)
+          echo "DUCP Master: $ducp_url"
+          while true; do
+            sleep 10
+            echo "Waiting for DUCP to become available."
+            curl -sLk -o /dev/null -w "%{http_code}\\n" "https://$ducp_url" | grep 200
+            curlstatus=$?
+            if [ $curlstatus -eq 0 ]; then
+              echo "DUCP is available. Continuing."
+              break
+            fi
+          done
+          fingerprint=$(openssl s_client -connect $ducp_url:443 < /dev/null 2> /dev/null | openssl x509 -noout -fingerprint)
           echo $fingerprint
-          $dockercmd --fingerprint $fingerprint
-          rm /tmp/test.out
-          curl -X PUT -H 'Content-Type:application/json' -d '{"Status" : "SUCCESS","Reason" : "Configuration OK","UniqueId" : "server1","Data" : "Slave Configured."}' "$wc_notify"
+          docker run --rm -e UCP_ADMIN_PASSWORD=$ucp_admin_passwd -e UCP_ADMIN_USER=$ucp_admin_user -e REGISTRY_USERNAME=$registry_name -e REGISTRY_PASSWORD='$registry_password' -e REGISTRY_EMAIL=$registry_email -v /var/run/docker.sock:/var/run/docker.sock --name ucp dockerorca/ucp join --old-kernel --url=https://$ducp_url --fingerprint $fingerprint
         params:  
-            $wait_notify: { get_resource: 'slave_wait_handle' }
             $ducp_url: {get_attr: [ducp_master, first_address]}
             $ucp_admin_passwd: {get_param: ucpadmpasswd}
             $ucp_admin_user: {get_param: ucpadmuser}
             $registry_name: {get_param: regname}
             $registry_password: {get_param: regpasswd}
             $registry_email: {get_param: regemail}
-
-  cloud_init_ducp:
-    type: OS::Heat::MultipartMime
-    properties:
-      parts:
-        - config: { get_resource: install_ducp }
-          subtype: "x-shellscript"
-        - config: {get_resource: ucd_agent_install_linux}
-          subtype: "x-shellscript"
-        - config: {get_resource: clear_master_wait}
-          subtype: "x-shellscript"
-
-  cloud_init_join:
-    type: OS::Heat::MultipartMime
-    properties:
-      parts:
-        - config: { get_resource: join_ducp }
-          subtype: "x-shellscript"
 
 outputs:
   instance_name:
