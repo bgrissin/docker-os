@@ -1,0 +1,219 @@
+
+# This is a HOT template to join two ducp swarm nodes to an existing DUCP swarm master
+# (see the ducp_master.yaml HOT template for master DUCP deploy)
+#
+#
+heat_template_version: 2013-05-23
+
+description: >
+  Heat Docker template to deploy 2 swarm nodes to DUCP within in an Openstack environment.
+#
+#
+
+parameters:
+  image:
+    type: string
+    label: Image name or ID
+    description: Image to be used for compute instance
+    default: rhel7.1-server_x86_64
+  flavor:
+    type: string
+    label: Flavor
+    description: Type of instance (flavor) to be used
+    default: m1.small
+  key:
+    type: string
+    label: Key name
+    description: Name of key-pair to be used for compute instance
+    default: cloud-key
+  private_network:
+    type: string
+    label: Private network name or ID
+    description: Network to attach instance to.
+    default: docker-demos-net
+  ucpadmuser:
+    type: string
+    label: DUCP admin user
+    description: Default Admin username of DUCP.
+    default: admin
+  ucpadmpasswd:
+    type: string
+    label: DUCP admin password
+    description:
+    default: orca
+  regname:
+    type: string
+    label: HUB user name
+    description: hub.docker.com account
+    default:
+  regpasswd:
+    type: string
+    label: HUB password
+    description: hub.docker.com password
+    default:
+    hidden: true
+  regemail:
+    type: string
+    label: HUB email acccount
+    description: hub.docker.com email
+    default:
+
+resources:
+
+  ducp_master:
+    type: OS::Nova::Server
+    properties:
+      image: { get_param: image }
+      flavor: { get_param: flavor }
+      key_name: { get_param: key }
+      networks:
+          - network: { get_param: private_network }
+      security_groups:
+        - {get_resource: docker_sg}
+      user_data: {get_resource: cloud_init_ducp}
+      user_data_format: RAW
+
+  ducp_floating_ip:
+    type: OS::Nova::FloatingIP
+    properties:
+      pool: ext-net
+
+  ducp_association:
+    type: OS::Nova::FloatingIPAssociation
+    properties:
+      floating_ip: { get_resource: ducp_floating_ip }
+      server_id: { get_resource: ducp_master }
+
+  server2:
+    type: OS::Nova::Server
+    properties:
+      image: { get_param: image }
+      flavor: { get_param: flavor }
+      key_name: { get_param: key }
+      networks:
+          - network: { get_param: private_network  }
+      security_groups:
+        - {get_resource: docker_sg}
+      user_data: {get_resource: cloud_init_join}
+      user_data_format: RAW
+
+  server3:
+    type: OS::Nova::Server
+    properties:
+      image: { get_param: image }
+      flavor: { get_param: flavor }
+      key_name: { get_param: key }
+      networks:
+          - network: { get_param: private_network  }
+      security_groups:
+        - {get_resource: docker_sg}
+      user_data: {get_resource: cloud_init_join}
+      user_data_format: RAW
+
+  cloud_init_ducp:
+    type: OS::Heat::MultipartMime
+    properties:
+      parts:
+        - config: { get_resource: install_ducp }
+          subtype: "x-shellscript"
+
+  cloud_init_join:
+    type: OS::Heat::MultipartMime
+    properties:
+      parts:
+        - config: { get_resource: join_ducp }
+          subtype: "x-shellscript"
+
+  docker_sg:
+    type: OS::Neutron::SecurityGroup
+    properties:
+      description: Ping, SSH, Docker
+      rules:
+      - protocol: icmp
+      - protocol: tcp
+        port_range_min: 22
+        port_range_max: 22
+      - protocol: tcp
+        port_range_min: 80
+        port_range_max: 80
+      - protocol: tcp
+        port_range_min: 443
+        port_range_max: 443
+      - protocol: tcp
+        port_range_min: 2376
+        port_range_max: 2376
+      - protocol: tcp
+        port_range_min: 12376
+        port_range_max: 12376
+      - protocol: tcp
+        port_range_min: 12379
+        port_range_max: 12379
+      - protocol: tcp
+        port_range_min: 12380
+        port_range_max: 12380
+      - protocol: tcp
+        port_range_min: 12381
+        port_range_max: 12381
+      - protocol: tcp
+        port_range_min: 12382
+        port_range_max: 12382
+
+  install_ducp:
+    type: OS::Heat::SoftwareConfig
+    properties:
+      config:
+        str_replace:
+          template: |
+            #!/bin/bash
+            curl -sSL https://get.docker.com/ | sh
+            systemctl start docker
+            docker run --rm -e UCP_ADMIN_PASSWORD=$ucp_admin_passwd -e UCP_ADMIN_USER=$ucp_admin_user -e REGISTRY_USERNAME=$registry_name -e REGISTRY_PASSWORD='$registry_password' -e REGISTRY_EMAIL=$registry_email -v /var/run/docker.sock:/var/run/docker.sock --name ucp dockerorca/ucp install --old-kernel
+          params:
+            $ucp_admin_passwd: {get_param: ucpadmpasswd}
+            $ucp_admin_user: {get_param: ucpadmuser}
+            $registry_name: {get_param: regname}
+            $registry_password: {get_param: regpasswd}
+            $registry_email: {get_param: regemail}
+
+  join_ducp:
+    type: OS::Heat::SoftwareConfig
+    properties:
+      config:
+       str_replace:
+        template: |
+          #!/bin/bash
+          curl -sSL https://get.docker.com/ | sh
+          systemctl start docker
+          echo "DUCP Master: $ducp_url"
+          while true; do
+            sleep 10
+            echo "Waiting for DUCP to become available."
+            curl -sLk -o /dev/null -w "%{http_code}\\n" "https://$ducp_url" | grep 200
+            curlstatus=$?
+            if [ $curlstatus -eq 0 ]; then
+              echo "DUCP is available. Continuing."
+              break
+            fi
+          done
+          fingerprint=$(openssl s_client -connect $ducp_url:443 < /dev/null 2> /dev/null | openssl x509 -noout -fingerprint)
+          echo $fingerprint
+          docker run --rm -e UCP_ADMIN_PASSWORD=$ucp_admin_passwd -e UCP_ADMIN_USER=$ucp_admin_user -e REGISTRY_USERNAME=$registry_name -e REGISTRY_PASSWORD='$registry_password' -e REGISTRY_EMAIL=$registry_email -v /var/run/docker.sock:/var/run/docker.sock --name ucp dockerorca/ucp join --old-kernel --url=https://$ducp_url --fingerprint $fingerprint
+        params:  
+            $ducp_url: {get_attr: [ducp_master, first_address]}
+            $ucp_admin_passwd: {get_param: ucpadmpasswd}
+            $ucp_admin_user: {get_param: ucpadmuser}
+            $registry_name: {get_param: regname}
+            $registry_password: {get_param: regpasswd}
+            $registry_email: {get_param: regemail}
+
+outputs:
+  instance_name:
+    description: Name of the instance
+    value: { get_attr: [ducp_master, name] }
+  instance_ip:
+    description: IP address of the instance
+    value: { get_attr: [ducp_master, first_address] }
+  blueprint_url:
+    description: Blueprint Origin URL
+    value:  https://192.168.10.229:8443/landscaper/view/projects?open=ucdpadmin_00000000_0000_0000_0000_000000000002-OrionContent/Internal-Team/DUCP_swarm_master_build/DUCP_swarm_master_build.yml
+
