@@ -272,7 +272,7 @@ resources:
       config:
        str_replace:
         template: |
-          #!/bin/bash -x
+          #!/bin/bash
           curl -sSL https://get.docker.com/ | sh
           systemctl start docker
           echo "DUCP Master: $ducp_url"
