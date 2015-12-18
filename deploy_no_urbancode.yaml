@@ -60,6 +60,11 @@ parameters:
 
 resources:
 
+  cerner-zone:
+    type: IBM::Route53::HostedZone
+    properties:
+      name: cerner.dockering.com
+
   ducp_master:
     type: OS::Nova::Server
     properties:
@@ -109,6 +114,20 @@ resources:
         - {get_resource: docker_sg}
       user_data: {get_resource: cloud_init_join}
       user_data_format: RAW
+
+  cerner-record-set:
+    type: IBM::Route53::RecordSet
+    properties:
+      name: 
+        str_replace: 
+          template: |
+            *._env_.cerner.dockering.com
+          params:
+            _env_: { get_param: OS::stack_name }
+      type: A
+      hosted_zone: cerner.dockering.com.
+      resource_records:
+        - { get_attr: [ducp_floating_ip, floating_ip] }
 
   cloud_init_ducp:
     type: OS::Heat::MultipartMime
