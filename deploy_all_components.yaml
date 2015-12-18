@@ -88,19 +88,29 @@ resources:
           - network: { get_param: private_network }
       security_groups:
         - {get_resource: docker_sg}
-  store-frontend:
-    depends_on: store-backend-wlp
+
+  frontend:
     type: IBM::UrbanCode::SoftwareDeploy::UCD
+    depends_on: backendwlp
     properties:
-      apply_config: { get_resource: store-frontend_sw_config }
+      apply_config: { get_resource: frontend_sw_config }
       server: ducp_master
       version: LATEST
-      agent_timeout: "360"
+      agent_timeout: "900"
+      
+  frontend1:
+    type: IBM::UrbanCode::SoftwareDeploy::UCD
+    depends_on: backendwlp
+    properties:
+      apply_config: { get_resource: frontend_sw_config }
+      server: ducp_master
+      version: LATEST
+      agent_timeout: "900"
 
-  store-frontend_sw_config:
+  frontend_sw_config:
     type: IBM::UrbanCode::SoftwareConfig::UCD
     properties: 
-      name: "store-frontend"
+      name: "frontend"
       component_process: Deploy
       component_process_timeout: "900"
       ucd_server_url: { get_param: ucd_server_url } # these should come from resource_tree
@@ -112,19 +122,19 @@ resources:
         ducp.user: { get_param: ucpadmuser }  # Default Admin username of DUCP.
         ducp.password: { get_param: ucpadmpasswd }
 
-  store-backend-wlp:
-    depends_on: store-db2
+  backendwlp:
     type: IBM::UrbanCode::SoftwareDeploy::UCD
+    depends_on: db2
     properties:
-      apply_config: { get_resource: store-backend-wlp_sw_config }
+      apply_config: { get_resource: backendwlp_sw_config }
       server: ducp_master
       version: LATEST
-      agent_timeout: "360"
+      agent_timeout: "900"
 
-  store-backend-wlp_sw_config:
+  backendwlp_sw_config:
     type: IBM::UrbanCode::SoftwareConfig::UCD
     properties: 
-      name: "store-backend-wlp"
+      name: "backendwlp"
       component_process: Deploy
       component_process_timeout: "900"
       ucd_server_url: { get_param: ucd_server_url } # these should come from resource_tree
@@ -136,19 +146,19 @@ resources:
         ducp.user: { get_param: ucpadmuser }  # Default Admin username of DUCP.
         ducp.password: { get_param: ucpadmpasswd }
 
-  store-db2:
-    depends_on: store-mysql
+  db2:
     type: IBM::UrbanCode::SoftwareDeploy::UCD
+    depends_on: mysql
     properties:
-      apply_config: { get_resource: store-db2_sw_config }
+      apply_config: { get_resource: db2_sw_config }
       server: ducp_master
       version: LATEST
-      agent_timeout: "360"
+      agent_timeout: "900"
 
-  store-db2_sw_config:
+  db2_sw_config:
     type: IBM::UrbanCode::SoftwareConfig::UCD
     properties: 
-      name: "store-db2"
+      name: "db2"
       component_process: Deploy
       component_process_timeout: "900"
       ucd_server_url: { get_param: ucd_server_url } # these should come from resource_tree
@@ -176,19 +186,19 @@ resources:
         - config: { get_resource: join_ducp }
           subtype: "x-shellscript"
           
-  store-mysql:
+  mysql:
     depends_on: [server2,server3]
     type: IBM::UrbanCode::SoftwareDeploy::UCD
     properties:
-      apply_config: { get_resource: store-mysql_sw_config }
+      apply_config: { get_resource: mysql_sw_config }
       server: ducp_master
       version: LATEST
       agent_timeout: "900"
 
-  store-mysql_sw_config:
+  mysql_sw_config:
     type: IBM::UrbanCode::SoftwareConfig::UCD
     properties: 
-      name: "store-mysql"
+      name: "mysql"
       component_process: Deploy
       component_process_timeout: "900"
       ucd_server_url: { get_param: ucd_server_url } # these should come from resource_tree
@@ -250,6 +260,9 @@ resources:
         port_range_min: 80
         port_range_max: 80
       - protocol: tcp
+        port_range_min: 8080
+        port_range_max: 8080
+      - protocol: tcp
         port_range_min: 443
         port_range_max: 443
       - protocol: tcp
@@ -281,6 +294,8 @@ resources:
             curl -sSL https://get.docker.com/ | sh
             systemctl start docker
             docker run --rm -e UCP_ADMIN_PASSWORD=$ucp_admin_passwd -e UCP_ADMIN_USER=$ucp_admin_user -e REGISTRY_USERNAME=$registry_name -e REGISTRY_PASSWORD='$registry_password' -e REGISTRY_EMAIL=$registry_email -v /var/run/docker.sock:/var/run/docker.sock --name ucp dockerorca/ucp install --old-kernel
+            ducp_url=$(/sbin/ip -o -4 addr list eth0 | awk '{print $4}' | cut -d/ -f1)
+            docker run -d -e affinity:container==ucp-swarm-manager --name=interlock -p 8080:8080 --restart=always -v ucp-swarm-node-certs:/data:ro dtr.dockering.com/infra/interlock:latest --swarm-url tcp://$ducp_url:2376 --swarm-tls-ca-cert /data/ca.pem --swarm-tls-cert /data/cert.pem --swarm-tls-key /data/key.pem --plugin haproxy start
           params:
             $ucp_admin_passwd: {get_param: ucpadmpasswd}
             $ucp_admin_user: {get_param: ucpadmuser}
